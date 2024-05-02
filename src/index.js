@@ -37,7 +37,7 @@ class Mf2 {
     if (i18next) {
       const { bindI18n, bindI18nStore, memoize } = this.options
 
-      i18next.MessageFormat = IntlMessageFormat
+      i18next.MessageFormat = Intl.MessageFormat
       i18next.Mf2 = this
 
       if (memoize) {

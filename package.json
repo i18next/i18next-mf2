@@ -1,6 +1,6 @@
 {
   "name": "i18next-mf2",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "i18nFormat plugin to use mf2 format with i18next",
   "main": "./index.js",
   "module": "dist/es/index.js",

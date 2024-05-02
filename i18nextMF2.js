@@ -145,7 +145,7 @@
             bindI18n = _this$options.bindI18n,
             bindI18nStore = _this$options.bindI18nStore,
             memoize = _this$options.memoize;
-          i18next.MessageFormat = IntlMessageFormat;
+          i18next.MessageFormat = Intl.MessageFormat;
           i18next.Mf2 = this;
           if (memoize) {
             if (bindI18n) {
