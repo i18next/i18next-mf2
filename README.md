@@ -19,7 +19,7 @@ Source can be loaded via [npm](https://www.npmjs.com/package/i18next-mf2) or [do
 # npm package
 $ npm install i18next-mf2
 # peer dependencies
-$ npm install intl-messageformat
+$ npm install --save-exact messageformat@next
 ```
 
 Wiring up:
