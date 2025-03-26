@@ -2,14 +2,15 @@
 
 [![npm version](https://img.shields.io/npm/v/i18next-mf2.svg?style=flat-square)](https://www.npmjs.com/package/i18next-mf2)
 
-This changes i18n format from i18next json to message format 2. See [mf2 workgroup](https://github.com/unicode-org/message-format-wg)
-
-You will need to polyfill `Intl.MessageFormat`using following [polyfill](https://github.com/messageformat/messageformat/tree/main/packages/mf2-messageformat)
+This changes i18n format from i18next json to Unicode MessageFormat 2.
+See [messageformat.unicode.org](https://messageformat.unicode.org/) for more on the syntax,
+and [messageformat.github.io](https://messageformat.github.io/) for its JavaScript implementation.
 
 ## Advice
 
-When using this module, only the mf2 message format is respected, this means the i18next format interpolation will not work.
-So for example instead of `Hi {{name}}!` it is `{Hi {$name}!}`
+When using this module, only the Unicode MessageFormat 2 syntax is respected,
+this means the i18next format interpolation will not work.
+So for example instead of `Hi {{name}}!` it is `Hi {$name}!`
 
 # Getting started
 
@@ -25,10 +26,10 @@ $ npm install --save-exact messageformat@next
 Wiring up:
 
 ```js
-import i18next from 'i18next'
-import mf2 from 'i18next-mf2'
+import i18next from 'i18next';
+import mf2 from 'i18next-mf2';
 
-i18next.use(mf2).init(i18nextOptions)
+i18next.use(mf2).init(i18nextOptions);
 ```
 
 - As with all modules you can either pass the constructor function (class) to the i18next.use or a concrete instance.
@@ -38,7 +39,7 @@ i18next.use(mf2).init(i18nextOptions)
 
 ```js
 {
-  // per default mf2 functions are parsed once and cached for subsequent calls
+  // per default MF2 functions are parsed once and cached for subsequent calls
   memoize: true,
 
   // memoize if not having a lookup and just using the key fallback as value
@@ -50,11 +51,18 @@ i18next.use(mf2).init(i18nextOptions)
   // which events on resourceSource should clear the cache, can be set to false or string of events separated by " "
   bindI18nStore: '',
 
-  // Will be run when parser throws an error. Can return any string, which can be used as a fallback, in case of broken translation.
-  // If omitted, the default swallows the error and returns the unsubstituted string (res)
-  parseErrorHandler: (err, key, res, options) => {},
+  // whether to enable MF2 functions that are not yet stable:
+  // :date, :datetime, :time, :math, :currency, :unit
+  mf2DraftFunctions: false,
 
-  // Transform the language code prior to mf2 locale parsing, useful for supporting psuedo-locales like en-ZZ
+  // custom MF2 message functions
+  mf2Functions: undefined,
+
+  // Will be run when parser throws an error. Can return any string, which can be used as a fallback, in case of broken translation.
+  // If omitted, the default swallows the error and returns the unsubstituted message source string
+  parseErrorHandler: (err, key, msgsrc, options) => {},
+
+  // Transform the language code prior to MF2 locale parsing, useful for supporting psuedo-locales like en-ZZ
   // If omitted, the default leaves the language code as is
   parseLngForMf2: (lng) => lng,
 }
@@ -63,39 +71,43 @@ i18next.use(mf2).init(i18nextOptions)
 Options can be passed in by setting options.i18nFormat in i18next.init:
 
 ```js
-import i18next from 'i18next'
-import mf2 from 'i18next-mf2'
+import i18next from 'i18next';
+import MF2 from 'i18next-mf2';
 
-i18next.use(mf2).init({
-  i18nFormat: options
-})
+i18next.use(MF2).init({
+  i18nFormat: options,
+});
 ```
 
-### more complete sample
+### More complete sample
 
 ```js
-import i18next from 'i18next'
-import mf2 from 'i18next-mf2'
+import i18next from 'i18next';
+import MF2 from 'i18next-mf2';
 
-i18next.use(mf2).init({
+i18next.use(MF2).init({
   lng: 'en',
   resources: {
     en: {
       translation: {
-        key: '{Today is {$today :datetime dateStyle=medium}}'
-      }
-    }
-  }
-})
+        key: 'Today is {$today :date style=medium}.',
+      },
+    },
+  },
+  i18nFormat: {
+    mf2DraftFunctions: true,
+  },
+});
 
-i18next.t('key', { today: new Date('2022-02-02') }) // -> 'Today is Feb 2, 2022'
+i18next.t('key', { today: new Date('2022-02-02') }); // -> 'Today is Feb 2, 2022.'
 ```
 
 ## hints
 
-Using i18next-mf2 - non of the i18next specific stuff will be available. You will have to rely on what intl-messageformat provides by calling the `t` function with needed options.
+While using `i18next-mf2` none of the i18next specific stuff will be available.
+You will have to rely on the functions provided by Unicode MessageFormat.
 
-All extra features build around i18next plurals, interpolation, context do not get applied to messageformat based keys.
+All extra features build around i18next plurals, interpolation, context do not get applied to Unicode MessageFormat based keys.
 
 ---
 
