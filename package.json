@@ -1,6 +1,6 @@
 {
   "name": "i18next-mf2",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "i18nFormat plugin to use Unicode MessageFormat 2 with i18next",
   "main": "./index.js",
   "module": "dist/es/index.js",
