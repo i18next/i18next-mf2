@@ -118,4 +118,3 @@ All extra features build around i18next plurals, interpolation, context do not g
     <img src="https://raw.githubusercontent.com/i18next/i18next/master/assets/locize_sponsor_240.gif" width="240px">
   </a>
 </p>
-# i18next-mf2
