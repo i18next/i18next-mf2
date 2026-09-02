@@ -4,8 +4,18 @@ coverage/
 .babelrc
 .editorconfig
 .eslintignore
-.eslintrc
+.eslintrc*
 .gitignore
 bower.json
 gulpfile.js
 karma.conf.js
+.prettierignore
+.prettierrc.json
+rollup.config.js
+# npm ignores .gitignore once .npmignore exists, so local/secret files are mirrored here
+.claude
+.vscode
+.idea
+.env*
+*.pem
+*.key
