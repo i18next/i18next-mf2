@@ -133,9 +133,7 @@ Without `debug` these checks do not run.
 
 ## TypeScript
 
-i18next's type-level interpolation extractor looks for the default `{{variable}}` syntax in your translation strings. MF2 variants like `* {{You have {$numPhotos} photos.}}` use double braces as pattern delimiters, so the extractor reads them as an interpolation and asks for a variable that does not exist.
-
-To opt out of the extractor (since `i18next` v26.2.0), set `parseInterpolation: false` in your `CustomTypeOptions`:
+Since `i18next` v26.5.0, set `parseInterpolation: 'mf2'` in your `CustomTypeOptions` and the options of `t()` (and the `values` of react-i18next's `Trans`) are type-checked against the variables of each message:
 
 ```ts
 // i18next.d.ts
@@ -143,7 +141,7 @@ import 'i18next';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
-    parseInterpolation: false;
+    parseInterpolation: 'mf2';
     defaultNS: 'translation';
     resources: {
       translation: {
@@ -154,7 +152,17 @@ declare module 'i18next' {
 }
 ```
 
-The flag is type-only; runtime formatting is handled by messageformat and is not affected.
+```ts
+t('key', { numPhotos: 3 }); // ok
+t('key', { numPhotos: 'three' }); // type error: numPhotos takes a number
+t('key'); // type error: 'pass these arguments as t() options': { numPhotos: number }
+```
+
+`{$name}` takes a string or number, a variable annotated with `:number`, `:integer`, `:currency`, `:percent` or `:unit` (inline or through `.input` / `.local`) a number, `:datetime`, `:date` and `:time` a `Date`, `:string` a string, and option and markup variables (`minimumFractionDigits=$digits`, `{#link href=$url}`) are required too. `.local` variables are not arguments. `interpolationFormatTypeMap` changes a type by function name, for example a custom `uppercase: string`. The messages need literal types, as the resources file from [i18next-cli](https://github.com/i18next/i18next-cli)'s `types` command has them; with `typeof` a JSON import every message is a `string` and the variables are not checked.
+
+With `i18next` v26.2.0 to v26.4.x, set `parseInterpolation: false` instead. i18next's own extractor looks for `{{variable}}`, and MF2 variants like `* {{You have {$numPhotos} photos.}}` use double braces as pattern delimiters, so it would ask for a variable that does not exist. With `false`, keys are checked but the options are not.
+
+Both settings are type-only; runtime formatting is handled by messageformat and is not affected.
 
 ---
 
