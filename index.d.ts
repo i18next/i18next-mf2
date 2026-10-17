@@ -9,8 +9,12 @@ declare module 'i18next-mf2' {
     bindI18nStore?: string;
     mf2DraftFunctions?: boolean;
     mf2Functions?: Record<string, MessageFunction<string>>;
+    /** Set to 'none' to drop the U+2068/U+2069 isolation marks around placeholders. */
+    bidiIsolation?: 'default' | 'none';
     parseErrorHandler?: (err: Error, key: string, msgsrc: string, options: Object) => string;
     parseLngForMf2?: (lng: string) => string;
+    /** @deprecated use parseLngForMf2 */
+    parseLngForMF2?: (lng: string) => string;
   }
 
   export interface MF2Instance<TOptions = MF2Config> extends ThirdPartyModule {

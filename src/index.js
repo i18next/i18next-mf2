@@ -10,8 +10,11 @@ function getDefaults() {
     bindI18nStore: '',
     mf2DraftFunctions: false,
     mf2Functions: undefined,
+    bidiIsolation: undefined,
     parseErrorHandler: (err, key, res, _options) => res,
-    parseLngForMF2: (lng) => lng,
+    // the documented name is parseLngForMf2; parseLngForMF2 is still read for backwards compatibility
+    parseLngForMf2: undefined,
+    parseLngForMF2: undefined,
   };
 }
 
@@ -34,7 +37,7 @@ class MF2 {
     if (i18next) {
       const { bindI18n, bindI18nStore, memoize } = this.options;
 
-      i18next.MessageFormat = Intl.MessageFormat;
+      i18next.MessageFormat = MessageFormat;
       i18next.MF2 = this;
 
       if (memoize) {
@@ -60,14 +63,15 @@ class MF2 {
 
     try {
       if (!fc) {
-        const locale = this.options.parseLngForMF2(lng);
+        const parseLng = this.options.parseLngForMf2 || this.options.parseLngForMF2;
+        const locale = parseLng ? parseLng(lng) : lng;
         let functions = this.options.mf2Functions;
         if (this.options.mf2DraftFunctions) functions = { ...DraftFunctions, ...functions };
-        // without ignoreTag, react-i18next <Trans> translations with <0></0> placeholders
-        // will fail to parse, as MessageFormat expects them to be defined in the
-        // options passed to fc.format() as { 0: (children) => string }
-        // but the replacement of placeholders is done in react-i18next
-        fc = new MessageFormat(locale, msgsrc, { functions });
+        // react-i18next <Trans> placeholders like <0></0> are plain text in MF2,
+        // so they pass through untouched and react-i18next replaces them
+        const mfOptions = { functions };
+        if (this.options.bidiIsolation) mfOptions.bidiIsolation = this.options.bidiIsolation;
+        fc = new MessageFormat(locale, msgsrc, mfOptions);
         if (this.options.memoize && (this.options.memoizeFallback || !info || hadSuccessfulLookup))
           setPath(this.mem, memKey, fc);
       }

@@ -165,6 +165,56 @@ for (const [name, MF2] of Object.entries(
       });
     });
 
+    describe('options', () => {
+      it('should use the documented parseLngForMf2', () => {
+        const parseLngForMf2 = vi.fn(() => 'en-US');
+        const mf2 = new MF2({ parseLngForMf2 });
+        expect(mf2.parse('Hello {$who}', { who: 'world' }, 'en-ZZ', 'ns', 'key')).toEqual(
+          'Hello ⁨world⁩',
+        );
+        expect(parseLngForMf2).toHaveBeenCalledWith('en-ZZ');
+      });
+
+      it('should drop the isolation marks with bidiIsolation none', () => {
+        const mf2 = new MF2({ bidiIsolation: 'none' });
+        expect(mf2.parse('Hello {$who}', { who: 'world' }, 'en', 'ns', 'key')).toEqual(
+          'Hello world',
+        );
+      });
+
+      it('should expose the MessageFormat class on i18next', () => {
+        const instance = i18next.createInstance();
+        instance.use(MF2).init({ lng: 'en', resources: {} });
+        expect(typeof instance.MessageFormat).toBe('function');
+        expect(new instance.MessageFormat('en', 'Hi').format()).toBe('Hi');
+      });
+
+      it('should support the stable :currency and :offset functions', () => {
+        const mf2 = new MF2({ bidiIsolation: 'none' });
+        expect(mf2.parse('{$v :currency currency=EUR}', { v: 0.5 }, 'en', 'ns', 'cur')).toEqual(
+          '€0.50',
+        );
+        expect(mf2.parse('{$n :offset add=1}', { n: 1 }, 'en', 'ns', 'off')).toEqual('2');
+      });
+    });
+
+    describe('memoize cache keys', () => {
+      it('should not write to Object.prototype through the namespace segment', () => {
+        const mf2 = new MF2();
+        for (const ns of ['__proto__', 'constructor', 'prototype']) {
+          expect(mf2.parse('Hi', {}, 'en', ns, 'polluted')).toEqual('Hi');
+        }
+        expect({}.polluted).toBeUndefined();
+        expect(Object.prototype.polluted).toBeUndefined();
+      });
+
+      it('should still memoize dotted keys', () => {
+        const mf2 = new MF2({ bidiIsolation: 'none' });
+        expect(mf2.parse('Hi {$a}', { a: 1 }, 'en', 'ns', 'deep.key')).toEqual('Hi 1');
+        expect(mf2.parse('ignored', { a: 2 }, 'en', 'ns', 'deep.key')).toEqual('Hi 2');
+      });
+    });
+
     describe('with missing keys', () => {
       it('should call the error handler', () => {
         const parseErrorHandler = vi.fn();

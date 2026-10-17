@@ -141,22 +141,25 @@
    */
   class MessageResolutionError extends MessageError {
       source;
-      constructor(type, message, source) {
+      cause;
+      constructor(type, message, source, cause) {
           super(type, message);
           this.source = source;
+          if (cause !== undefined)
+              this.cause = cause;
       }
   }
   /**
-   * Errors in message selection.
+   * Message runtime resolution errors
    *
    * @category Errors
    */
-  class MessageSelectionError extends MessageError {
+  class MessageFunctionError extends MessageError {
+      source;
       cause;
-      constructor(type, cause) {
-          super(type, `Selection error: ${type}`);
-          if (cause !== undefined)
-              this.cause = cause;
+      constructor(type, message) {
+          super(type, message);
+          this.source = '�';
       }
   }
 
@@ -374,7 +377,7 @@
   /** Requires and consumes leading and trailing whitespace. */
   function options() {
       ws('/}');
-      const options = new Map();
+      const options = {};
       let isEmpty = true;
       while (pos < source.length) {
           const next = source[pos];
@@ -382,37 +385,37 @@
               break;
           const start = pos;
           const name_ = identifier();
-          if (options.has(name_)) {
+          if (Object.hasOwn(options, name_)) {
               throw SyntaxError('duplicate-option-name', start, pos);
           }
           ws();
           expect('=', true);
           ws();
-          options.set(name_, value(true));
+          options[name_] = value(true);
           isEmpty = false;
           ws('/}');
       }
       return isEmpty ? null : options;
   }
   function attributes() {
-      const attributes = new Map();
+      const attributes = {};
       let isEmpty = true;
       while (source[pos] === '@') {
           const start = pos;
           pos += 1; // '@'
           const name_ = identifier();
-          if (attributes.has(name_)) {
+          if (Object.hasOwn(attributes, name_)) {
               throw SyntaxError('duplicate-attribute', start, pos);
           }
           ws('=/}');
           if (source[pos] === '=') {
               pos += 1; // '='
               ws();
-              attributes.set(name_, literal(true));
+              attributes[name_] = literal(true);
               ws('/}');
           }
           else {
-              attributes.set(name_, true);
+              attributes[name_] = true;
           }
           isEmpty = false;
       }
@@ -538,7 +541,7 @@
           if (options_) {
               const end = options?.(options_, context);
               if (value) {
-                  for (const value_ of options_.values()) {
+                  for (const value_ of Object.values(options_)) {
                       value(value_, context, 'option');
                   }
               }
@@ -549,7 +552,7 @@
           if (attributes_) {
               const end = attributes?.(attributes_, context);
               if (value) {
-                  for (const value_ of attributes_.values()) {
+                  for (const value_ of Object.values(attributes_)) {
                       if (value_ !== true)
                           value(value_, context, 'attribute');
                   }
@@ -799,7 +802,7 @@
       throw new RangeError('Not a string');
   }
 
-  function readNumericOperand(value, source) {
+  function readNumericOperand(value) {
       let options = undefined;
       if (typeof value === 'object') {
           const valueOf = value?.valueOf;
@@ -817,21 +820,19 @@
           }
       }
       if (typeof value !== 'bigint' && typeof value !== 'number') {
-          const msg = 'Input is not numeric';
-          throw new MessageResolutionError('bad-operand', msg, source);
+          throw new MessageFunctionError('bad-operand', 'Input is not numeric');
       }
       return { value, options };
   }
   function getMessageNumber(ctx, value, options, canSelect) {
-      let { dir, locales, source } = ctx;
+      let { dir, locales } = ctx;
       // @ts-expect-error We may have been a bit naughty earlier.
       if (options.useGrouping === 'never')
           options.useGrouping = false;
       if (canSelect &&
           'select' in options &&
           !ctx.literalOptionKeys.has('select')) {
-          const msg = 'The option select may only be set by a literal value';
-          ctx.onError(new MessageResolutionError('bad-option', msg, source));
+          ctx.onError('bad-option', 'The option select may only be set by a literal value');
           canSelect = false;
       }
       let locale;
@@ -840,7 +841,6 @@
       let str;
       return {
           type: 'number',
-          source,
           get dir() {
               if (dir == null) {
                   locale ??= Intl.NumberFormat.supportedLocalesOf(locales, options)[0];
@@ -853,7 +853,14 @@
           },
           selectKey: canSelect
               ? keys => {
-                  const str = String(value);
+                  let numVal = value;
+                  if (options.style === 'percent') {
+                      if (typeof numVal === 'bigint')
+                          numVal *= 100n;
+                      else
+                          numVal *= 100;
+                  }
+                  const str = String(numVal);
                   if (keys.has(str))
                       return str;
                   if (options.select === 'exact')
@@ -862,7 +869,7 @@
                       ? { ...options, select: undefined, type: options.select }
                       : options;
                   // Intl.PluralRules needs a number, not bigint
-                  cat ??= new Intl.PluralRules(locales, pluralOpt).select(Number(value));
+                  cat ??= new Intl.PluralRules(locales, pluralOpt).select(Number(numVal));
                   return keys.has(cat) ? cat : null;
               }
               : undefined,
@@ -872,8 +879,8 @@
               locale ??= nf.resolvedOptions().locale;
               dir ??= getLocaleDir(locale);
               return dir === 'ltr' || dir === 'rtl'
-                  ? [{ type: 'number', source, dir, locale, parts }]
-                  : [{ type: 'number', source, locale, parts }];
+                  ? [{ type: 'number', dir, locale, parts }]
+                  : [{ type: 'number', locale, parts }];
           },
           toString() {
               nf ??= new Intl.NumberFormat(locales, options);
@@ -884,7 +891,7 @@
       };
   }
   function number(ctx, exprOpt, operand) {
-      const input = readNumericOperand(operand, ctx.source);
+      const input = readNumericOperand(operand);
       const value = input.value;
       const options = Object.assign({}, input.options, {
           localeMatcher: ctx.localeMatcher,
@@ -915,14 +922,13 @@
               }
           }
           catch {
-              const msg = `Value ${optval} is not valid for :number option ${name}`;
-              ctx.onError(new MessageResolutionError('bad-option', msg, ctx.source));
+              ctx.onError('bad-option', `Value ${optval} is not valid for :number option ${name}`);
           }
       }
       return getMessageNumber(ctx, value, options, true);
   }
   function integer(ctx, exprOpt, operand) {
-      const input = readNumericOperand(operand, ctx.source);
+      const input = readNumericOperand(operand);
       const value = Number.isFinite(input.value)
           ? Math.round(input.value)
           : input.value;
@@ -950,8 +956,7 @@
               }
           }
           catch {
-              const msg = `Value ${optval} is not valid for :integer option ${name}`;
-              ctx.onError(new MessageResolutionError('bad-option', msg, ctx.source));
+              ctx.onError('bad-option', `Value ${optval} is not valid for :integer option ${name}`);
           }
       }
       return getMessageNumber(ctx, value, options, true);
@@ -964,8 +969,7 @@
    * @beta
    */
   function currency(ctx, exprOpt, operand) {
-      const { source } = ctx;
-      const input = readNumericOperand(operand, source);
+      const input = readNumericOperand(operand);
       const options = Object.assign({}, input.options, {
           localeMatcher: ctx.localeMatcher,
           style: 'currency'
@@ -994,7 +998,7 @@
                   case 'currencyDisplay': {
                       const strval = asString(optval);
                       if (strval === 'never') {
-                          ctx.onError(new MessageResolutionError('unsupported-operation', 'Currency display "never" is not yet supported', source));
+                          ctx.onError('unsupported-operation', 'Currency display "never" is not yet supported');
                       }
                       else {
                           // @ts-expect-error Let Intl.NumberFormat construction fail
@@ -1017,231 +1021,223 @@
                   }
               }
           }
-          catch (error) {
-              if (error instanceof MessageError) {
-                  ctx.onError(error);
-              }
-              else {
-                  const msg = `Value ${optval} is not valid for :currency option ${name}`;
-                  ctx.onError(new MessageResolutionError('bad-option', msg, source));
-              }
+          catch {
+              ctx.onError('bad-option', `Value ${optval} is not valid for :currency option ${name}`);
           }
       }
       if (!options.currency) {
-          const msg = 'A currency code is required for :currency';
-          throw new MessageResolutionError('bad-operand', msg, source);
+          throw new MessageFunctionError('bad-operand', 'A currency code is required for :currency');
       }
       return getMessageNumber(ctx, input.value, options, false);
   }
 
-  const styleOptions = new Set(['dateStyle', 'timeStyle']);
-  const fieldOptions = new Set([
+  const dateFieldsValues = new Set([
       'weekday',
-      'era',
-      'year',
-      'month',
-      'day',
-      'hour',
-      'minute',
-      'second',
-      'fractionalSecondDigits',
-      'timeZoneName'
+      'day-weekday',
+      'month-day',
+      'month-day-weekday',
+      'year-month-day',
+      'year-month-day-weekday'
   ]);
+  const dateLengthValues = new Set(['long', 'medium', 'short']);
+  const timePrecisionValues = new Set(['hour', 'minute', 'second']);
+  const timeZoneStyleValues = new Set(['long', 'short']);
   /**
-   * `datetime` accepts a Date, number or string as its input
-   * and formats it with the same options as
-   * {@link https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat | Intl.DateTimeFormat}.
+   * The function `:datetime` is used to format a date/time value.
+   * Its formatted result will always include both the date and the time, and optionally a timezone.
    *
    * @beta
    */
-  const datetime = (ctx, options, operand) => dateTimeImplementation(ctx, operand, res => {
-      let hasStyle = false;
-      let hasFields = false;
-      for (const [name, value] of Object.entries(options)) {
-          if (value === undefined)
-              continue;
-          try {
-              switch (name) {
-                  case 'locale':
-                      break;
-                  case 'fractionalSecondDigits':
-                      res[name] = asPositiveInteger(value);
-                      hasFields = true;
-                      break;
-                  case 'hour12':
-                      res[name] = asBoolean(value);
-                      break;
-                  default:
-                      res[name] = asString(value);
-                      if (!hasStyle && styleOptions.has(name))
-                          hasStyle = true;
-                      if (!hasFields && fieldOptions.has(name))
-                          hasFields = true;
-              }
-          }
-          catch {
-              const msg = `Value ${value} is not valid for :datetime ${name} option`;
-              ctx.onError(new MessageResolutionError('bad-option', msg, ctx.source));
-          }
-      }
-      if (!hasStyle && !hasFields) {
-          res.dateStyle = 'medium';
-          res.timeStyle = 'short';
-      }
-      else if (hasStyle && hasFields) {
-          const msg = 'Style and field options cannot be both set for :datetime';
-          throw new MessageResolutionError('bad-option', msg, ctx.source);
-      }
-  });
+  const datetime = (ctx, options, operand) => dateTimeImplementation('datetime', ctx, options, operand);
   /**
-   * `date` accepts a Date, number or string as its input
-   * and formats it according to a single "style" option.
+   * The function `:date` is used to format the date portion of date/time values.
    *
    * @beta
    */
-  const date = (ctx, options, operand) => dateTimeImplementation(ctx, operand, res => {
-      for (const name of Object.keys(res)) {
-          if (styleOptions.has(name) || fieldOptions.has(name))
-              delete res[name];
-      }
-      for (const [name, value] of Object.entries(options)) {
-          if (value === undefined)
-              continue;
-          try {
-              switch (name) {
-                  case 'style':
-                      res.dateStyle = asString(value);
-                      break;
-                  case 'hour12':
-                      res[name] = asBoolean(value);
-                      break;
-                  case 'calendar':
-                  case 'timeZone':
-                      res[name] = asString(value);
-              }
-          }
-          catch {
-              const msg = `Value ${value} is not valid for :date ${name} option`;
-              ctx.onError(new MessageResolutionError('bad-option', msg, ctx.source));
-          }
-      }
-      res.dateStyle ??= 'medium';
-  });
+  const date = (ctx, options, operand) => dateTimeImplementation('date', ctx, options, operand);
   /**
-   * `time` accepts a Date, number or string as its input
-   * and formats it according to a single "style" option.
+   * The function `:time` is used to format the time portion of date/time values.
+   * Its formatted result will always include the time, and optionally a timezone.
    *
    * @beta
    */
-  const time = (ctx, options, operand) => dateTimeImplementation(ctx, operand, res => {
-      for (const name of Object.keys(res)) {
-          if (styleOptions.has(name) || fieldOptions.has(name))
-              delete res[name];
-      }
-      for (const [name, value] of Object.entries(options)) {
-          if (value === undefined)
-              continue;
-          try {
-              switch (name) {
-                  case 'style':
-                      res.timeStyle = asString(value);
-                      break;
-                  case 'hour12':
-                      res[name] = asBoolean(value);
-                      break;
-                  case 'calendar':
-                  case 'timeZone':
-                      res[name] = asString(value);
-              }
+  const time = (ctx, options, operand) => dateTimeImplementation('time', ctx, options, operand);
+  function dateTimeImplementation(functionName, ctx, exprOpt, operand) {
+      const options = {
+          localeMatcher: ctx.localeMatcher
+      };
+      let value = operand;
+      if (typeof value === 'object' && value !== null) {
+          const opt = value.options;
+          if (opt) {
+              options.calendar = opt.calendar;
+              if (functionName !== 'date')
+                  options.hour12 = opt.hour12;
+              options.timeZone = opt.timeZone;
           }
-          catch {
-              const msg = `Value ${value} is not valid for :time ${name} option`;
-              ctx.onError(new MessageResolutionError('bad-option', msg, ctx.source));
-          }
+          if (typeof value.valueOf === 'function')
+              value = value.valueOf();
       }
-      res.timeStyle ??= 'short';
-  });
-  function dateTimeImplementation(ctx, input, parseOptions) {
-      const { localeMatcher, locales, source } = ctx;
-      const opt = { localeMatcher };
-      if (input && typeof input === 'object') {
-          if (input && 'options' in input)
-              Object.assign(opt, input.options);
-          if (!(input instanceof Date) && typeof input.valueOf === 'function') {
-              input = input.valueOf();
-          }
-      }
-      let value;
-      switch (typeof input) {
+      switch (typeof value) {
           case 'number':
           case 'string':
-              value = new Date(input);
-              break;
-          case 'object':
-              value = input;
-              break;
+              value = new Date(value);
       }
       if (!(value instanceof Date) || isNaN(value.getTime())) {
-          const msg = 'Input is not a date';
-          throw new MessageResolutionError('bad-operand', msg, source);
+          throw new MessageFunctionError('bad-operand', 'Input is not a valid date');
       }
-      parseOptions(opt);
-      const date = value;
-      let locale;
+      // Override options
+      if (exprOpt.calendar !== undefined) {
+          try {
+              options.calendar = asString(exprOpt.calendar);
+          }
+          catch {
+              ctx.onError('bad-option', `Invalid :${functionName} calendar option value`);
+          }
+      }
+      if (exprOpt.hour12 !== undefined && functionName !== 'date') {
+          try {
+              options.hour12 = asBoolean(exprOpt.hour12);
+          }
+          catch {
+              ctx.onError('bad-option', `Invalid :${functionName} hour12 option value`);
+          }
+      }
+      if (exprOpt.timeZone !== undefined) {
+          let tz;
+          try {
+              tz = asString(exprOpt.timeZone);
+          }
+          catch {
+              ctx.onError('bad-option', `Invalid :${functionName} timeZone option value`);
+          }
+          if (tz === 'input') {
+              if (options.timeZone === undefined) {
+                  ctx.onError('bad-operand', `Missing input timeZone value for :${functionName}`);
+              }
+          }
+          else if (tz !== undefined) {
+              if (options.timeZone !== undefined && tz !== options.timeZone) {
+                  // Use fallback value for expression
+                  throw new MessageFunctionError('bad-option', 'Time zone conversion is not supported');
+              }
+              options.timeZone = tz;
+          }
+      }
+      // Date formatting options
+      if (functionName !== 'time') {
+          const dfName = functionName === 'date' ? 'fields' : 'dateFields';
+          const dlName = functionName === 'date' ? 'length' : 'dateLength';
+          const dateFieldsValue = readStringOption(ctx, exprOpt, dfName, dateFieldsValues) ??
+              'year-month-day';
+          const dateLength = readStringOption(ctx, exprOpt, dlName, dateLengthValues);
+          const dateFields = new Set(dateFieldsValue.split('-'));
+          if (dateFields.has('year'))
+              options.year = 'numeric';
+          if (dateFields.has('month')) {
+              options.month =
+                  dateLength === 'long'
+                      ? 'long'
+                      : dateLength === 'short'
+                          ? 'numeric'
+                          : 'short';
+          }
+          if (dateFields.has('day'))
+              options.day = 'numeric';
+          if (dateFields.has('weekday')) {
+              options.weekday = dateLength === 'long' ? 'long' : 'short';
+          }
+      }
+      // Time formatting options
+      if (functionName !== 'date') {
+          const tpName = functionName === 'time' ? 'precision' : 'timePrecision';
+          switch (readStringOption(ctx, exprOpt, tpName, timePrecisionValues)) {
+              case 'hour':
+                  options.hour = 'numeric';
+                  break;
+              case 'second':
+                  options.hour = 'numeric';
+                  options.minute = 'numeric';
+                  options.second = 'numeric';
+                  break;
+              default:
+                  options.hour = 'numeric';
+                  options.minute = 'numeric';
+          }
+          options.timeZoneName = readStringOption(ctx, exprOpt, 'timeZoneStyle', timeZoneStyleValues);
+      }
+      // Resolved value
+      const dtf = new Intl.DateTimeFormat(ctx.locales, options);
       let dir = ctx.dir;
-      let dtf;
+      let locale;
       let str;
       return {
           type: 'datetime',
-          source,
           get dir() {
               if (dir == null) {
-                  locale ??= Intl.DateTimeFormat.supportedLocalesOf(locales, opt)[0];
+                  locale ??= dtf.resolvedOptions().locale;
                   dir = getLocaleDir(locale);
               }
               return dir;
           },
           get options() {
-              return { ...opt };
+              return { ...options };
           },
           toParts() {
-              dtf ??= new Intl.DateTimeFormat(locales, opt);
-              const parts = dtf.formatToParts(date);
+              const parts = dtf.formatToParts(value);
               locale ??= dtf.resolvedOptions().locale;
               dir ??= getLocaleDir(locale);
               return dir === 'ltr' || dir === 'rtl'
-                  ? [{ type: 'datetime', source, dir, locale, parts }]
-                  : [{ type: 'datetime', source, locale, parts }];
+                  ? [{ type: 'datetime', dir, locale, parts }]
+                  : [{ type: 'datetime', locale, parts }];
           },
           toString() {
-              dtf ??= new Intl.DateTimeFormat(locales, opt);
-              str ??= dtf.format(date);
+              str ??= dtf.format(value);
               return str;
           },
-          valueOf: () => date
+          valueOf: () => value
       };
+  }
+  function readStringOption(ctx, options, name, allowed) {
+      const value = options[name];
+      if (value !== undefined) {
+          try {
+              const str = asString(value);
+              if (allowed && !allowed.has(str))
+                  throw Error();
+              return str;
+          }
+          catch {
+              ctx.onError('bad-option', `Invalid value for ${name} option`);
+          }
+      }
+      return undefined;
   }
 
   /**
-   * `math` accepts a numeric value as input and adds or subtracts an integer value from it
+   * `offset` accepts a numeric value as input and adds or subtracts an integer value from it
    *
    * @beta
    */
-  function math(ctx, exprOpt, operand) {
-      const { source } = ctx;
-      let { value, options } = readNumericOperand(operand, source);
+  function offset(ctx, exprOpt, operand) {
+      let { value, options } = readNumericOperand(operand);
       let add;
-      let sub;
       try {
           add = 'add' in exprOpt ? asPositiveInteger(exprOpt.add) : -1;
+      }
+      catch {
+          throw new MessageFunctionError('bad-option', `Value ${exprOpt.add} is not valid for :offset option add`);
+      }
+      let sub;
+      try {
           sub = 'subtract' in exprOpt ? asPositiveInteger(exprOpt.subtract) : -1;
       }
-      catch (error) {
-          throw new MessageResolutionError('bad-option', String(error), source);
+      catch {
+          throw new MessageFunctionError('bad-option', `Value ${exprOpt.subtract} is not valid for :offset option subtract`);
       }
       if (add < 0 === sub < 0) {
-          const msg = 'Exactly one of "add" or "subtract" is required as a :math option';
-          throw new MessageResolutionError('bad-option', msg, source);
+          const msg = 'Exactly one of "add" or "subtract" is required as an :offset option';
+          throw new MessageFunctionError('bad-option', msg);
       }
       const delta = add < 0 ? -sub : add;
       if (typeof value === 'number')
@@ -1251,20 +1247,58 @@
       return number(ctx, {}, { valueOf: () => value, options });
   }
 
+  /**
+   * The function `:percent` is a selector and formatter for percent values.
+   *
+   * @beta
+   */
+  function percent(ctx, exprOpt, operand) {
+      const input = readNumericOperand(operand);
+      const options = Object.assign({}, input.options, {
+          localeMatcher: ctx.localeMatcher,
+          style: 'percent'
+      });
+      for (const [name, optval] of Object.entries(exprOpt)) {
+          if (optval === undefined)
+              continue;
+          try {
+              switch (name) {
+                  case 'roundingMode':
+                  case 'roundingPriority':
+                  case 'signDisplay':
+                  case 'trailingZeroDisplay':
+                  case 'useGrouping':
+                      // @ts-expect-error Let Intl.NumberFormat construction fail
+                      options[name] = asString(optval);
+                      break;
+                  case 'minimumFractionDigits':
+                  case 'maximumFractionDigits':
+                  case 'minimumSignificantDigits':
+                  case 'maximumSignificantDigits':
+                      options[name] = asPositiveInteger(optval);
+                      break;
+              }
+          }
+          catch {
+              ctx.onError('bad-option', `Value ${optval} is not valid for :percent option ${name}`);
+          }
+      }
+      return getMessageNumber(ctx, input.value, options, true);
+  }
+
   function string(ctx, _options, operand) {
       const str = operand === undefined ? '' : String(operand);
       const selStr = str.normalize();
       return {
           type: 'string',
-          source: ctx.source,
           dir: ctx.dir ?? 'auto',
           selectKey: keys => (keys.has(selStr) ? selStr : null),
           toParts() {
-              const { dir, source } = ctx;
+              const { dir } = ctx;
               const locale = ctx.locales[0];
               return dir === 'ltr' || dir === 'rtl'
-                  ? [{ type: 'string', source, dir, locale, value: str }]
-                  : [{ type: 'string', source, locale, value: str }];
+                  ? [{ type: 'string', dir, locale, value: str }]
+                  : [{ type: 'string', locale, value: str }];
           },
           toString: () => str,
           valueOf: () => str
@@ -1278,8 +1312,7 @@
    * @beta
    */
   function unit(ctx, exprOpt, operand) {
-      const { source } = ctx;
-      const input = readNumericOperand(operand, source);
+      const input = readNumericOperand(operand);
       const options = Object.assign({}, input.options, {
           localeMatcher: ctx.localeMatcher,
           style: 'unit'
@@ -1315,14 +1348,12 @@
                   ctx.onError(error);
               }
               else {
-                  const msg = `Value ${optval} is not valid for :currency option ${name}`;
-                  ctx.onError(new MessageResolutionError('bad-option', msg, source));
+                  ctx.onError('bad-option', `Value ${optval} is not valid for :currency option ${name}`);
               }
           }
       }
       if (!options.unit) {
-          const msg = 'A unit identifier is required for :unit';
-          throw new MessageResolutionError('bad-operand', msg, source);
+          throw new MessageFunctionError('bad-operand', 'A unit identifier is required for :unit');
       }
       return getMessageNumber(ctx, input.value, options, false);
   }
@@ -1342,28 +1373,54 @@
    */
   /**
    * Functions classified as REQUIRED by the
-   * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#contents-of-part-9-messageformat | LDML 47 MessageFormat specification}.
+   * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#contents-of-part-9-messageformat | LDML 48.2 MessageFormat specification}.
    */
   let DefaultFunctions = {
       /**
-       * Supports formatting and selection as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-integer-function | :integer function}.
+       * Supports formatting as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-currency-function | :currency function}.
+       *
+       * The `operand` must be a number, BigInt, or string representing a JSON number,
+       * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
+       *
+       * The `currency` option must be provided by either the operand's `options` or the `exprOpt` expression options.
+       */
+      currency,
+      /**
+       * Supports formatting and selection as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-integer-function | :integer function}.
        *
        * The `operand` must be a number, BigInt, or string representing a JSON number,
        * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
        */
       integer,
       /**
-       * Supports formatting and selection as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-number-function | :number function}.
+       * Supports formatting and selection as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-number-function | :number function}.
        *
        * The `operand` must be a number, BigInt, or string representing a JSON number,
        * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
        */
       number,
       /**
-       * Supports formatting and selection as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-string-function | :string function}.
+       * Supports formatting and selection as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-offset-function | :offset function}.
+       *
+       * The `operand` must be a number, BigInt, or string representing a JSON number,
+       * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
+       */
+      offset,
+      /**
+       * Supports formatting as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-percent-function | :percent function}.
+       *
+       * The `operand` must be a number, BigInt, or string representing a JSON number,
+       * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
+       */
+      percent,
+      /**
+       * Supports formatting and selection as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-string-function | :string function}.
        *
        * The `operand` must be a stringifiable value.
        * An `undefined` value is resolved as an empty string.
@@ -1373,7 +1430,7 @@
   DefaultFunctions = Object.freeze(Object.assign(Object.create(null), DefaultFunctions));
   /**
    * Functions classified as DRAFT by the
-   * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#contents-of-part-9-messageformat | LDML 47 MessageFormat specification}.
+   * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#contents-of-part-9-messageformat | LDML 48.2 MessageFormat specification}.
    *
    * These are liable to change, and are **_not_** covered by any stability guarantee.
    *
@@ -1388,50 +1445,32 @@
    */
   let DraftFunctions = {
       /**
-       * Supports formatting as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-currency-function | :currency function}.
-       *
-       * The `operand` must be a number, BigInt, or string representing a JSON number,
-       * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
-       *
-       * The `currency` option must be provided by either the operand's `options` or the `exprOpt` expression options.
-       */
-      currency,
-      /**
-       * Supports formatting as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-date-function | :date function}.
+       * Supports formatting as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-date-function | :date function}.
        *
        * The `operand` must be a Date, number, or string representing a date,
        * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
        */
       date,
       /**
-       * Supports formatting as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-datetime-function | :datetime function}.
+       * Supports formatting as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-datetime-function | :datetime function}.
        *
        * The `operand` must be a Date, number, or string representing a date,
        * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
        */
       datetime,
       /**
-       * Supports formatting and selection as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-math-function | :math function}.
-       *
-       * The `operand` must be a number, BigInt, or string representing a JSON number,
-       * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
-       */
-      math,
-      /**
-       * Supports formatting as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-time-function | :time function}.
+       * Supports formatting as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-time-function | :time function}.
        *
        * The `operand` must be a Date, number, or string representing a date,
        * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
        */
       time,
       /**
-       * Supports formatting as defined in LDML 47 for the
-       * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#the-unit-function | :unit function}.
+       * Supports formatting as defined in LDML 48.2 for the
+       * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#the-unit-function | :unit function}.
        *
        * The `operand` must be a number, BigInt, or string representing a JSON number,
        * or an object wrapping such a value, with a `valueOf()` accessor and an optional `options` object.
@@ -1455,7 +1494,7 @@
       type: 'unknown',
       source,
       dir: 'auto',
-      toParts: () => [{ type: 'unknown', source, value: input }],
+      toParts: () => [{ type: 'unknown', value: input }],
       toString: () => String(input),
       valueOf: () => input
   });
@@ -1463,34 +1502,34 @@
   class MessageFunctionContext {
       #ctx;
       #litKeys;
+      #source;
       dir;
       id;
-      source;
       constructor(ctx, source, options) {
           this.#ctx = ctx;
+          this.#source = source;
           this.dir = undefined;
-          const dirOpt = options?.get('u:dir');
+          const dirOpt = options && Object.hasOwn(options, 'u:dir') ? options['u:dir'] : undefined;
           if (dirOpt) {
               const dir = String(resolveValue(ctx, dirOpt));
               if (dir === 'ltr' || dir === 'rtl' || dir === 'auto') {
                   this.dir = dir;
               }
               else if (dir !== 'inherit') {
-                  const msg = 'Unsupported value for u:dir option';
-                  const optSource = getValueSource(dirOpt);
-                  ctx.onError(new MessageResolutionError('bad-option', msg, optSource));
+                  const error = new MessageFunctionError('bad-option', 'Unsupported value for u:dir option');
+                  error.source = getValueSource(dirOpt);
+                  ctx.onError(error);
               }
           }
-          const idOpt = options?.get('u:id');
+          const idOpt = options && Object.hasOwn(options, 'u:id') ? options['u:id'] : undefined;
           this.id = idOpt ? String(resolveValue(ctx, idOpt)) : undefined;
           if (options) {
               this.#litKeys = new Set();
-              for (const [key, value] of options) {
+              for (const [key, value] of Object.entries(options)) {
                   if (value.type === 'literal')
                       this.#litKeys.add(key);
               }
           }
-          this.source = source;
       }
       get literalOptionKeys() {
           return new Set(this.#litKeys);
@@ -1501,52 +1540,66 @@
       get locales() {
           return this.#ctx.locales.map(String);
       }
-      get onError() {
-          return this.#ctx.onError;
+      onError(error, message) {
+          let mfError;
+          if (error instanceof MessageFunctionError) {
+              mfError = error;
+          }
+          else if (typeof error === 'string' && typeof message === 'string') {
+              mfError = new MessageFunctionError(error, message);
+          }
+          else {
+              mfError = new MessageFunctionError('function-error', String(error));
+              mfError.cause = error;
+          }
+          mfError.source = this.#source;
+          this.#ctx.onError(mfError);
       }
   }
 
   function resolveFunctionRef(ctx, operand, { name, options }) {
-      const source = getValueSource(operand) ?? `:${name}`;
+      const fnSource = `:${name}`;
+      const source = getValueSource(operand) ?? fnSource;
       try {
           const fnInput = operand ? [resolveValue(ctx, operand)] : [];
           const rf = ctx.functions[name];
           if (!rf) {
-              throw new MessageError('unknown-function', `Unknown function :${name}`);
+              throw new MessageResolutionError('unknown-function', `Unknown function ${fnSource}`, source);
           }
           const msgCtx = new MessageFunctionContext(ctx, source, options);
           const opt = resolveOptions(ctx, options);
-          let res = rf(msgCtx, opt, ...fnInput);
+          const res = rf(msgCtx, opt, ...fnInput);
           if (res === null ||
-              (typeof res !== 'object' && typeof res !== 'function') ||
-              typeof res.type !== 'string' ||
-              typeof res.source !== 'string') {
-              throw new MessageError('bad-function-result', `Function :${name} did not return a MessageValue`);
+              typeof res !== 'object' ||
+              typeof res.type !== 'string') {
+              throw new MessageResolutionError('bad-function-result', `Function ${fnSource} did not return a MessageValue`, source);
           }
-          if (msgCtx.dir)
-              res = { ...res, dir: msgCtx.dir, [BIDI_ISOLATE]: true };
+          const override = { source };
+          if (msgCtx.dir) {
+              override.dir = msgCtx.dir;
+              override[BIDI_ISOLATE] = true;
+          }
           if (msgCtx.id && typeof res.toParts === 'function') {
-              return {
-                  ...res,
-                  toParts() {
-                      const parts = res.toParts();
-                      for (const part of parts)
-                          part.id = msgCtx.id;
-                      return parts;
-                  }
+              override.toParts = () => {
+                  const parts = res.toParts();
+                  for (const part of parts)
+                      part.id = msgCtx.id;
+                  return parts;
               };
           }
-          return res;
+          return { ...res, ...override };
       }
       catch (error) {
-          ctx.onError(error);
+          ctx.onError(error instanceof MessageError
+              ? error
+              : new MessageResolutionError('bad-function-result', String(error), source, error));
           return fallback(source);
       }
   }
   function resolveOptions(ctx, options) {
       const opt = Object.create(null);
       if (options) {
-          for (const [name, value] of options) {
+          for (const [name, value] of Object.entries(options)) {
               if (!name.startsWith('u:'))
                   opt[name] = resolveValue(ctx, value);
           }
@@ -1554,18 +1607,18 @@
       return opt;
   }
 
-  function resolveLiteral(ctx, lit) {
-      const msgCtx = new MessageFunctionContext(ctx, `|${lit.value}|`);
-      return string(msgCtx, {}, lit.value);
-  }
-
   function resolveExpression(ctx, { arg, functionRef }) {
       if (functionRef) {
           return resolveFunctionRef(ctx, arg, functionRef);
       }
       switch (arg?.type) {
-          case 'literal':
-              return resolveLiteral(ctx, arg);
+          case 'literal': {
+              const source = `|${arg.value}|`;
+              const msgCtx = new MessageFunctionContext(ctx, source);
+              const msgStr = string(msgCtx, {}, arg.value);
+              msgStr.source = source;
+              return msgStr;
+          }
           case 'variable':
               return resolveVariableRef(ctx, arg);
           default:
@@ -1640,30 +1693,38 @@
   function resolveVariableRef(ctx, ref) {
       const source = '$' + ref.name;
       const value = lookupVariableRef(ctx, ref);
+      if (value === undefined)
+          return fallback(source);
       let type = typeof value;
       if (type === 'object') {
           const mv = value;
           if (mv.type === 'fallback')
               return fallback(source);
-          if (ctx.localVars.has(mv))
+          if (ctx.localVars.has(mv)) {
+              mv.source = source;
               return mv;
+          }
           if (value instanceof Number)
               type = 'number';
           else if (value instanceof String)
               type = 'string';
       }
+      let msgFn;
       switch (type) {
           case 'bigint':
-          case 'number': {
-              const msgCtx = new MessageFunctionContext(ctx, source);
-              return ctx.functions.number(msgCtx, {}, value);
-          }
-          case 'string': {
-              const msgCtx = new MessageFunctionContext(ctx, source);
-              return ctx.functions.string(msgCtx, {}, value);
-          }
+          case 'number':
+              msgFn = ctx.functions.number;
+              break;
+          case 'string':
+              msgFn = ctx.functions.string;
+              break;
+          default:
+              return unknown(source, value);
       }
-      return value === undefined ? fallback(source) : unknown(source, value);
+      const msgCtx = new MessageFunctionContext(ctx, source);
+      const mv = msgFn(msgCtx, {}, value);
+      mv.source = source;
+      return mv;
   }
 
   function resolveValue(ctx, value) {
@@ -1689,15 +1750,15 @@
   }
 
   function formatMarkup(ctx, { kind, name, options }) {
-      const source = kind === 'close' ? `/${name}` : kind === 'open' ? `#${name}` : `#${name}/`;
-      const part = { type: 'markup', kind, source, name };
-      if (options?.size) {
+      const part = { type: 'markup', kind, name };
+      const entries = options ? Object.entries(options) : null;
+      if (entries?.length) {
           part.options = {};
-          for (const [name, value] of options) {
+          for (const [name, value] of entries) {
               if (name === 'u:dir') {
-                  const msg = `The option ${name} is not valid for markup`;
-                  const optSource = getValueSource(value);
-                  ctx.onError(new MessageResolutionError('bad-option', msg, optSource));
+                  const error = new MessageFunctionError('bad-option', `The option ${name} is not valid for markup`);
+                  error.source = getValueSource(value);
+                  ctx.onError(error);
               }
               else {
                   let rv = resolveValue(ctx, value);
@@ -1715,90 +1776,88 @@
   }
 
   function selectPattern(context, message) {
-      switch (message.type) {
-          case 'message':
-              return message.pattern;
-          case 'select': {
-              const ctx = message.selectors.map(sel => {
-                  const selector = resolveVariableRef(context, sel);
-                  let selectKey;
-                  if (typeof selector.selectKey === 'function') {
-                      selectKey = selector.selectKey.bind(selector);
-                  }
-                  else {
-                      context.onError(new MessageSelectionError('bad-selector'));
-                      selectKey = () => null;
-                  }
-                  return {
-                      selectKey,
-                      best: null,
-                      keys: null
-                  };
-              });
-              let candidates = message.variants;
-              loop: for (let i = 0; i < ctx.length; ++i) {
-                  const sc = ctx[i];
-                  if (!sc.keys) {
-                      sc.keys = new Set();
-                      for (const { keys } of candidates) {
-                          const key = keys[i];
-                          if (!key)
-                              break loop; // key-mismatch error
-                          if (key.type !== '*')
-                              sc.keys.add(key.value);
-                      }
-                  }
-                  try {
-                      sc.best = sc.keys.size ? sc.selectKey(sc.keys) : null;
-                  }
-                  catch (error) {
-                      context.onError(new MessageSelectionError('bad-selector', error));
-                      sc.selectKey = () => null;
-                      sc.best = null;
-                  }
-                  // Leave out all candidate variants that aren't the best,
-                  // or only the catchall ones, if nothing else matches.
-                  candidates = candidates.filter(v => {
-                      const k = v.keys[i];
-                      if (k.type === '*')
-                          return sc.best == null;
-                      return sc.best === k.value;
-                  });
-                  // If we've run out of candidates,
-                  // drop the previous best key of the preceding selector,
-                  // reset all subsequent key sets,
-                  // and restart the loop.
-                  if (candidates.length === 0) {
-                      if (i === 0)
-                          break; // No match; should not happen
-                      const prev = ctx[i - 1];
-                      if (prev.best == null)
-                          prev.keys?.clear();
-                      else
-                          prev.keys?.delete(prev.best);
-                      for (let j = i; j < ctx.length; ++j)
-                          ctx[j].keys = null;
-                      candidates = message.variants;
-                      i = -1;
-                  }
-              }
-              const res = candidates[0];
-              if (!res) {
-                  // This should not be possible with a valid message.
-                  context.onError(new MessageSelectionError('no-match'));
-                  return [];
-              }
-              return res.value;
+      if (message.type === 'message')
+          return message.pattern;
+      // message.type === 'select'
+      const ctx = message.selectors.map(sel => {
+          const selector = resolveVariableRef(context, sel);
+          let selectKey;
+          if (typeof selector.selectKey === 'function') {
+              selectKey = selector.selectKey.bind(selector);
           }
-          default:
-              context.onError(new MessageSelectionError('bad-selector'));
-              return [];
+          else {
+              const msg = 'Selector does not support selection';
+              context.onError(new MessageResolutionError('bad-selector', msg, selector.source));
+              selectKey = () => null;
+          }
+          return {
+              selectKey,
+              source: selector.source,
+              best: null,
+              keys: null
+          };
+      });
+      let candidates = message.variants;
+      loop: for (let i = 0; i < ctx.length; ++i) {
+          const sc = ctx[i];
+          if (!sc.keys) {
+              sc.keys = new Set();
+              for (const { keys } of candidates) {
+                  const key = keys[i];
+                  if (!key)
+                      break loop; // key-mismatch error
+                  if (key.type !== '*')
+                      sc.keys.add(key.value);
+              }
+          }
+          try {
+              sc.best = sc.keys.size ? sc.selectKey(sc.keys) : null;
+          }
+          catch (error) {
+              const msg = 'Selection failed';
+              context.onError(new MessageResolutionError('bad-selector', msg, sc.source, error));
+              sc.selectKey = () => null;
+              sc.best = null;
+          }
+          // Leave out all candidate variants that aren't the best,
+          // or only the catchall ones, if nothing else matches.
+          candidates = candidates.filter(v => {
+              const k = v.keys[i];
+              if (k.type === '*')
+                  return sc.best == null;
+              return sc.best === k.value;
+          });
+          // If we've run out of candidates,
+          // drop the previous best key of the preceding selector,
+          // reset all subsequent key sets,
+          // and restart the loop.
+          if (candidates.length === 0) {
+              if (i === 0)
+                  break; // No match; should not happen
+              const prev = ctx[i - 1];
+              if (prev.best == null)
+                  prev.keys?.clear();
+              else
+                  prev.keys?.delete(prev.best);
+              for (let j = i; j < ctx.length; ++j)
+                  ctx[j].keys = null;
+              candidates = message.variants;
+              i = -1;
+          }
       }
+      const res = candidates[0];
+      if (!res) {
+          // This should not be possible with a valid message.
+          const msg = 'No variant was selected!?';
+          context.onError(new MessageResolutionError('no-match', msg, '.match'));
+          return [];
+      }
+      return res.value;
   }
 
   /**
    * A message formatter for that implements the
-   * {@link https://www.unicode.org/reports/tr35/tr35-75/tr35-messageFormat.html#contents-of-part-9-messageformat | LDML 47 MessageFormat}
+   * {@link https://www.unicode.org/reports/tr35/tr35-78/tr35-messageFormat.html#contents-of-part-9-messageformat | LDML 48.2 MessageFormat}
    * specification as well as the {@link https://github.com/tc39/proposal-intl-messageformat/ | TC39 Intl.MessageFormat proposal}.
    *
    * @category Formatting
@@ -1876,8 +1935,9 @@
                           }
                       }
                       else {
-                          const msg = 'Message part is not formattable';
-                          throw new MessageError('not-formattable', msg);
+                          const error = new MessageFunctionError('not-formattable', 'Message part is not formattable');
+                          error.source = mv.source;
+                          throw error;
                       }
                   }
                   catch (error) {
@@ -1905,12 +1965,11 @@
        * [
        *   { type: 'text', value: 'Hello ' },
        *   { type: 'bidiIsolation', value: '\u2068' },
-       *   { type: 'string', source: '$user.name', locale: 'en', value: 'Kat' },
+       *   { type: 'string', locale: 'en', value: 'Kat' },
        *   { type: 'bidiIsolation', value: '\u2069' },
        *   { type: 'text', value: ', today is ' },
        *   {
        *     type: 'datetime',
-       *     source: '$date',
        *     dir: 'ltr',
        *     locale: 'en',
        *     parts: [
@@ -1960,8 +2019,9 @@
                           }
                       }
                       else {
-                          const msg = 'Message part is not formattable';
-                          throw new MessageError('not-formattable', msg);
+                          const error = new MessageFunctionError('not-formattable', 'Message part is not formattable');
+                          error.source = mv.source;
+                          throw error;
                       }
                   }
                   catch (error) {
@@ -2009,6 +2069,10 @@
       }
   }
 
+  // Keys that must never be traversed when walking a string/array path into an
+  // object, otherwise a crafted path such as `__proto__.polluted` walks straight
+  // into Object.prototype. Same guard as i18next-icu 2.4.4.
+  var UNSAFE_KEYS = ['__proto__', 'constructor', 'prototype'];
   function getLastOfPath(object, path, Empty) {
     function cleanKey(key) {
       return key && key.indexOf('###') > -1 ? key.replace(/###/g, '.') : key;
@@ -2020,19 +2084,24 @@
     while (stack.length > 1) {
       if (canNotTraverseDeeper()) return {};
       var key = cleanKey(stack.shift());
+      if (UNSAFE_KEYS.indexOf(key) > -1) return {};
       if (!object[key] && Empty) object[key] = new Empty();
       object = object[key];
     }
     if (canNotTraverseDeeper()) return {};
+    var k = cleanKey(stack.shift());
+    if (UNSAFE_KEYS.indexOf(k) > -1) return {};
     return {
       obj: object,
-      k: cleanKey(stack.shift())
+      k: k
     };
   }
   function setPath(object, path, newValue) {
     var _getLastOfPath = getLastOfPath(object, path, Object),
       obj = _getLastOfPath.obj,
       k = _getLastOfPath.k;
+    if (obj === undefined) return; // unsafe path, drop silently
+
     obj[k] = newValue;
   }
   function getPath(object, path) {
@@ -2051,12 +2120,13 @@
       bindI18nStore: '',
       mf2DraftFunctions: false,
       mf2Functions: undefined,
+      bidiIsolation: undefined,
       parseErrorHandler: function parseErrorHandler(err, key, res, _options) {
         return res;
       },
-      parseLngForMF2: function parseLngForMF2(lng) {
-        return lng;
-      }
+      // the documented name is parseLngForMf2; parseLngForMF2 is still read for backwards compatibility
+      parseLngForMf2: undefined,
+      parseLngForMF2: undefined
     };
   }
   var MF2 = /*#__PURE__*/function () {
@@ -2076,7 +2146,7 @@
             bindI18n = _this$options.bindI18n,
             bindI18nStore = _this$options.bindI18nStore,
             memoize = _this$options.memoize;
-          i18next.MessageFormat = Intl.MessageFormat;
+          i18next.MessageFormat = MessageFormat;
           i18next.MF2 = this;
           if (memoize) {
             if (bindI18n) {
@@ -2104,16 +2174,17 @@
         }
         try {
           if (!fc) {
-            var locale = this.options.parseLngForMF2(lng);
+            var parseLng = this.options.parseLngForMf2 || this.options.parseLngForMF2;
+            var locale = parseLng ? parseLng(lng) : lng;
             var functions = this.options.mf2Functions;
             if (this.options.mf2DraftFunctions) functions = _objectSpread2(_objectSpread2({}, DraftFunctions), functions);
-            // without ignoreTag, react-i18next <Trans> translations with <0></0> placeholders
-            // will fail to parse, as MessageFormat expects them to be defined in the
-            // options passed to fc.format() as { 0: (children) => string }
-            // but the replacement of placeholders is done in react-i18next
-            fc = new MessageFormat(locale, msgsrc, {
+            // react-i18next <Trans> placeholders like <0></0> are plain text in MF2,
+            // so they pass through untouched and react-i18next replaces them
+            var mfOptions = {
               functions: functions
-            });
+            };
+            if (this.options.bidiIsolation) mfOptions.bidiIsolation = this.options.bidiIsolation;
+            fc = new MessageFormat(locale, msgsrc, mfOptions);
             if (this.options.memoize && (this.options.memoizeFallback || !info || hadSuccessfulLookup)) setPath(this.mem, memKey, fc);
           }
           return fc.format(options, function (err) {

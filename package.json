@@ -4,6 +4,7 @@
   "description": "i18nFormat plugin to use Unicode MessageFormat 2 with i18next",
   "main": "./index.js",
   "module": "dist/es/index.js",
+  "types": "./index.d.ts",
   "keywords": [
     "i18next",
     "i18next-format"
@@ -15,7 +16,7 @@
     "url": "https://github.com/i18next/i18next-mf2"
   },
   "dependencies": {
-    "messageformat": "4.0.0-10"
+    "messageformat": "^4.1.0"
   },
   "devDependencies": {
     "@babel/cli": "^7.27.0",
@@ -28,7 +29,7 @@
     "eslint": "8.57.0",
     "eslint-config-airbnb-base": "^15.0.0",
     "eslint-config-prettier": "^9.1.0",
-    "i18next": "^24.2.3",
+    "i18next": "^26.4.7",
     "prettier": "^3.5.3",
     "rimraf": "6.0.1",
     "rollup": "4.37.0",
