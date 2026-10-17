@@ -87,11 +87,15 @@ class MF2 {
 
   parse(msgsrc, options, lng, ns, key, info) {
     const hadSuccessfulLookup = info && info.resolved && info.resolved.res;
-    const memKey = this.options.memoize && `${lng}.${ns}.${key.replace(/\./g, '###')}`;
+    // an array path, so dots in ns or key do not nest the memo deeper
+    const memKey = this.options.memoize && [lng, ns, key];
 
     let fc;
     if (this.options.memoize) {
-      fc = getPath(this.mem, memKey);
+      // the memo key does not contain the message, so compare it: a message changed by
+      // addResource, reloadResources or HMR is compiled again instead of served stale
+      const memo = getPath(this.mem, memKey);
+      if (memo && memo.msgsrc === msgsrc) fc = memo.fc;
     }
 
     const where = this.debug && `key "${key}" (${lng}/${ns})`;
@@ -129,10 +133,15 @@ class MF2 {
           );
         }
         if (this.options.memoize && (this.options.memoizeFallback || !info || hadSuccessfulLookup))
-          setPath(this.mem, memKey, fc);
+          setPath(this.mem, memKey, { msgsrc, fc });
       }
 
-      return fc.format(options, (err) => {
+      // like i18next, values can also be passed in a replace object
+      const values =
+        options && options.replace && typeof options.replace === 'object'
+          ? { ...options, ...options.replace }
+          : options;
+      return fc.format(values, (err) => {
         if (this.debug && this.firstTime(`error ${lng} ${ns} ${key}`)) {
           this.warn(errorWarning(err, msgsrc, false, where));
         }

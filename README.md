@@ -39,6 +39,7 @@ i18next.use(mf2).init(i18nextOptions);
 ```js
 {
   // per default MF2 functions are parsed once and cached for subsequent calls
+  // (a message changed by addResource, reloadResources or HMR is parsed again)
   memoize: true,
 
   // memoize if not having a lookup and just using the key fallback as value
@@ -130,6 +131,21 @@ With i18next `debug: true`, i18next-mf2 logs a warning through the i18next logge
 - `interpolation.escapeValue` is on, which the plugin does not apply (logged once)
 
 Without `debug` these checks do not run.
+
+### React Native, Hermes and other runtimes without Intl
+
+messageformat uses the runtime's `Intl` APIs: `Intl.Locale` for every message, `Intl.PluralRules` to select plural variants, `Intl.NumberFormat` for `:number`, `:integer`, `:currency` and `:percent`. When one is missing, the default `parseErrorHandler` returns the message source (with `debug: true` the error is logged).
+
+- **Hermes** (the default React Native engine) implements `Intl.NumberFormat` and `Intl.DateTimeFormat` on Android and iOS, but not `Intl.Locale` or `Intl.PluralRules` (see [Hermes Intl APIs](https://github.com/facebook/hermes/blob/main/doc/IntlAPIs.md)), so no message is formatted, not even `Hello {$name}`. Polyfill both in your entry file, before i18next is initialized, with locale data for each language you ship:
+
+  ```js
+  import '@formatjs/intl-locale/polyfill.js';
+  import '@formatjs/intl-pluralrules/polyfill-force.js';
+  import '@formatjs/intl-pluralrules/locale-data/en.js';
+  import '@formatjs/intl-pluralrules/locale-data/de.js';
+  ```
+
+- **Runtimes without `Intl`** (Hermes on React Native for Windows, older Hermes and JavaScriptCore builds on Android): polyfill, in this order, `@formatjs/intl-getcanonicallocales`, `@formatjs/intl-locale`, `@formatjs/intl-pluralrules`, `@formatjs/intl-numberformat` and, for the draft `:date`/`:time` functions, `@formatjs/intl-datetimeformat`, the last three with locale data for your languages. See [FormatJS runtime requirements](https://formatjs.github.io/docs/guides/runtime-requirements/).
 
 ## TypeScript
 

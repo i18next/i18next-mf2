@@ -1,3 +1,10 @@
+### 2.1.1
+
+- fix: the `memoize` cache now compares the message, so a message that changed after its first use (`addResource`, `reloadResources`, a backend `reloadInterval`, HMR, next-i18next `reloadOnPrerender`) is compiled again instead of returning the old text. Before, this needed `bindI18nStore: 'added'` or `bindI18n: 'loaded'`, which still work.
+- fix: values passed in a `replace` object (`t('key', { replace: { name } })`) are used, like i18next does for its own interpolation
+- README: which `Intl` APIs messageformat needs and how to polyfill them on React Native with Hermes (which lacks `Intl.Locale`, so no message is formatted without the polyfill) and in runtimes without `Intl`
+- CI: lint, format check and tests on Node.js 20, 22 and 24
+
 ### 2.1.0
 
 - warn in debug mode: with i18next `debug: true`, log a warning through the i18next logger (once per key) when a message can not be parsed or formatted (the default `parseErrorHandler` swallowed this silently, now with a hint for i18next `{{name}}` syntax), when a message is only a quoted pattern like `{{name}}` (MF2 renders it as the text `name`), when `t` is called with `count` or `context` and suffix keys like `key_one` or `key_male` exist (i18next-mf2 does not look them up), when a message contains `$t(` nesting, when a key resolves to an object or array (`returnObjects`), and once per instance when `interpolation.escapeValue` is on, which the plugin does not apply. Each warning links to [Using ICU or MF2](https://www.i18next.com/how-to/using-icu-or-mf2). Without `debug` nothing changes.

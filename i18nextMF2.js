@@ -2195,10 +2195,14 @@
       value: function parse(msgsrc, options, lng, ns, key, info) {
         var _this2 = this;
         var hadSuccessfulLookup = info && info.resolved && info.resolved.res;
-        var memKey = this.options.memoize && "".concat(lng, ".").concat(ns, ".").concat(key.replace(/\./g, '###'));
+        // an array path, so dots in ns or key do not nest the memo deeper
+        var memKey = this.options.memoize && [lng, ns, key];
         var fc;
         if (this.options.memoize) {
-          fc = getPath(this.mem, memKey);
+          // the memo key does not contain the message, so compare it: a message changed by
+          // addResource, reloadResources or HMR is compiled again instead of served stale
+          var memo = getPath(this.mem, memKey);
+          if (memo && memo.msgsrc === msgsrc) fc = memo.fc;
         }
         var where = this.debug && "key \"".concat(key, "\" (").concat(lng, "/").concat(ns, ")");
         try {
@@ -2222,9 +2226,15 @@
             if (this.debug && typeof msgsrc === 'string' && /^\s*\{\{[^{}]*\}\}\s*$/.test(msgsrc) && this.firstTime("syntax ".concat(lng, " ").concat(ns, " ").concat(key))) {
               this.warn("".concat(where, " renders ").concat(msgsrc.trim(), " as plain text: i18next interpolation like {{name}} does not work with MF2, use {$name}."));
             }
-            if (this.options.memoize && (this.options.memoizeFallback || !info || hadSuccessfulLookup)) setPath(this.mem, memKey, fc);
+            if (this.options.memoize && (this.options.memoizeFallback || !info || hadSuccessfulLookup)) setPath(this.mem, memKey, {
+              msgsrc: msgsrc,
+              fc: fc
+            });
           }
-          return fc.format(options, function (err) {
+
+          // like i18next, values can also be passed in a replace object
+          var values = options && options.replace && _typeof(options.replace) === 'object' ? _objectSpread2(_objectSpread2({}, options), options.replace) : options;
+          return fc.format(values, function (err) {
             if (_this2.debug && _this2.firstTime("error ".concat(lng, " ").concat(ns, " ").concat(key))) {
               _this2.warn(errorWarning(err, msgsrc, false, where));
             }

@@ -211,7 +211,47 @@ for (const [name, MF2] of Object.entries(
       it('should still memoize dotted keys', () => {
         const mf2 = new MF2({ bidiIsolation: 'none' });
         expect(mf2.parse('Hi {$a}', { a: 1 }, 'en', 'ns', 'deep.key')).toEqual('Hi 1');
-        expect(mf2.parse('ignored', { a: 2 }, 'en', 'ns', 'deep.key')).toEqual('Hi 2');
+        const { fc } = mf2.mem.en.ns['deep.key'];
+        expect(mf2.parse('Hi {$a}', { a: 2 }, 'en', 'ns', 'deep.key')).toEqual('Hi 2');
+        expect(mf2.mem.en.ns['deep.key'].fc).toBe(fc);
+      });
+
+      it('should compile a message again when it changed (addResource, reloadResources)', async () => {
+        let hello = 'Hello {$name}';
+        const instance = i18next.createInstance();
+        await instance
+          .use({ type: 'backend', init() {}, read: (lng, ns, cb) => cb(null, { hello }) })
+          .use(MF2)
+          .init({ lng: 'en', fallbackLng: false, i18nFormat: { bidiIsolation: 'none' } });
+
+        expect(instance.t('hello', { name: 'Bob' })).toEqual('Hello Bob');
+
+        instance.addResource('en', 'translation', 'hello', 'Howdy {$name}');
+        expect(instance.t('hello', { name: 'Bob' })).toEqual('Howdy Bob');
+
+        hello = 'Hi {$name}';
+        await instance.reloadResources();
+        expect(instance.t('hello', { name: 'Bob' })).toEqual('Hi Bob');
+      });
+
+      it('should keep namespaces with dots apart', () => {
+        const mf2 = new MF2({ bidiIsolation: 'none' });
+        expect(mf2.parse('A {$x}', { x: 1 }, 'en', 'a', 'b')).toEqual('A 1');
+        expect(mf2.parse('B {$x}', { x: 2 }, 'en', 'a.b', 'fc')).toEqual('B 2');
+        expect(mf2.parse('A {$x}', { x: 3 }, 'en', 'a', 'b')).toEqual('A 3');
+      });
+    });
+
+    describe('values in replace', () => {
+      it('should read the values from a replace object like i18next', () => {
+        const mf2 = new MF2({ bidiIsolation: 'none' });
+        const msg = `.input {$count :number}
+.match $count
+one {{{$count} item for {$name}}}
+* {{{$count} items for {$name}}}`;
+        expect(mf2.parse(msg, { count: 2, replace: { name: 'Bob' } }, 'en', 'ns', 'key')).toEqual(
+          '2 items for Bob',
+        );
       });
     });
 

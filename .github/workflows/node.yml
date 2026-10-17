@@ -1,0 +1,30 @@
+name: node
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # messageformat needs ^20.19 || ^22.12 || >=24
+        node: ['24.x', '22.x', '20.x']
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install
+      - run: npm run lint
+      - run: npm run format
+      # CI is set by GitHub Actions, so the tests also run against the committed i18nextMF2.js and i18nextMF2.min.js
+      - run: npm test
