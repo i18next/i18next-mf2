@@ -61,6 +61,15 @@
     var i = _toPrimitive(t, "string");
     return "symbol" == typeof i ? i : i + "";
   }
+  function _typeof(o) {
+    "@babel/helpers - typeof";
+
+    return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) {
+      return typeof o;
+    } : function (o) {
+      return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o;
+    }, _typeof(o);
+  }
 
   const bidiChars$1 = /^[\u061c\u200e\u200f\u2066-\u2069]+/;
   const nameChars = /^[-.+0-9A-Z_a-z\u{a1}-\u{61b}\u{61d}-\u{167f}\u{1681}-\u{1fff}\u{200b}-\u{200d}\u{2010}-\u{2027}\u{2030}-\u{205e}\u{2060}-\u{2065}\u{206a}-\u{2fff}\u{3001}-\u{d7ff}\u{e000}-\u{fdcf}\u{fdf0}-\u{fffd}\u{10000}-\u{1fffd}\u{20000}-\u{2fffd}\u{30000}-\u{3fffd}\u{40000}-\u{4fffd}\u{50000}-\u{5fffd}\u{60000}-\u{6fffd}\u{70000}-\u{7fffd}\u{80000}-\u{8fffd}\u{90000}-\u{9fffd}\u{a0000}-\u{afffd}\u{b0000}-\u{bfffd}\u{c0000}-\u{cfffd}\u{d0000}-\u{dfffd}\u{e0000}-\u{efffd}\u{f0000}-\u{ffffd}\u{100000}-\u{10fffd}]+/u;
@@ -2112,6 +2121,8 @@
     return obj[k];
   }
 
+  var DOCS_URL = 'https://www.i18next.com/how-to/using-icu-or-mf2';
+  var PLURAL_SUFFIXES = ['zero', 'one', 'two', 'few', 'many', 'other'];
   function getDefaults() {
     return {
       memoize: true,
@@ -2129,11 +2140,22 @@
       parseLngForMF2: undefined
     };
   }
+  function errorWarning(err, msgsrc, isParseError, where) {
+    if (isParseError && msgsrc && _typeof(msgsrc) === 'object') {
+      return "".concat(where, " resolved to an object or array, but i18next-mf2 does not support returnObjects or joinArrays and returns the raw value unformatted.");
+    }
+    // {{ is valid MF2 in complex messages (.input, .local, .match), so only hint at it for a simple message that failed to parse
+    if (isParseError && typeof msgsrc === 'string' && msgsrc.includes('{{') && !/^\s*\./.test(msgsrc)) {
+      return "".concat(where, " could not be parsed (").concat(err.message, "). It contains \"{{\": i18next interpolation like {{name}} does not work with MF2, use {$name}.");
+    }
+    return "".concat(where, " could not be ").concat(isParseError ? 'parsed' : 'formatted', ": ").concat(err.message);
+  }
   var MF2 = /*#__PURE__*/function () {
     function MF2(options) {
       _classCallCheck(this, MF2);
       this.type = 'i18nFormat';
       this.mem = {};
+      this.warned = new Set();
       this.init(null, options);
     }
     return _createClass(MF2, [{
@@ -2148,6 +2170,12 @@
             memoize = _this$options.memoize;
           i18next.MessageFormat = MessageFormat;
           i18next.MF2 = this;
+          this.i18next = i18next;
+          // the warnings below only run with i18next `debug: true`, like i18next's own warnings
+          this.debug = !!(i18next.options && i18next.options.debug);
+          if (this.debug && i18next.options.interpolation && i18next.options.interpolation.escapeValue !== false) {
+            this.warn('interpolation.escapeValue is not applied, values are inserted without HTML escaping. Escape values before passing them to t, or set interpolation.escapeValue: false if your output is escaped elsewhere (e.g. by React).');
+          }
           if (memoize) {
             if (bindI18n) {
               i18next.on(bindI18n, function () {
@@ -2172,8 +2200,12 @@
         if (this.options.memoize) {
           fc = getPath(this.mem, memKey);
         }
+        var where = this.debug && "key \"".concat(key, "\" (").concat(lng, "/").concat(ns, ")");
         try {
           if (!fc) {
+            if (this.debug && typeof msgsrc === 'string' && msgsrc.includes('$t(') && this.firstTime("nesting ".concat(lng, " ").concat(ns, " ").concat(key))) {
+              this.warn("".concat(where, " contains \"$t(\", but i18next-mf2 does not support nesting, the text is output as is."));
+            }
             var parseLng = this.options.parseLngForMf2 || this.options.parseLngForMF2;
             var locale = parseLng ? parseLng(lng) : lng;
             var functions = this.options.mf2Functions;
@@ -2185,23 +2217,78 @@
             };
             if (this.options.bidiIsolation) mfOptions.bidiIsolation = this.options.bidiIsolation;
             fc = new MessageFormat(locale, msgsrc, mfOptions);
+            // {{name}} from i18next parses as an MF2 quoted pattern and renders "name". This also matches
+            // a valid quoted pattern without placeholders ({{ text}}), which is rare enough to accept.
+            if (this.debug && typeof msgsrc === 'string' && /^\s*\{\{[^{}]*\}\}\s*$/.test(msgsrc) && this.firstTime("syntax ".concat(lng, " ").concat(ns, " ").concat(key))) {
+              this.warn("".concat(where, " renders ").concat(msgsrc.trim(), " as plain text: i18next interpolation like {{name}} does not work with MF2, use {$name}."));
+            }
             if (this.options.memoize && (this.options.memoizeFallback || !info || hadSuccessfulLookup)) setPath(this.mem, memKey, fc);
           }
           return fc.format(options, function (err) {
-            return _this2.options.parseErrorHandler(err, key, msgsrc, options);
+            if (_this2.debug && _this2.firstTime("error ".concat(lng, " ").concat(ns, " ").concat(key))) {
+              _this2.warn(errorWarning(err, msgsrc, false, where));
+            }
+            _this2.options.parseErrorHandler(err, key, msgsrc, options);
           });
         } catch (err) {
+          if (this.debug && this.firstTime("error ".concat(lng, " ").concat(ns, " ").concat(key))) {
+            this.warn(errorWarning(err, msgsrc, !fc, where));
+          }
           return this.options.parseErrorHandler(err, key, msgsrc, options);
         }
       }
-
-      // eslint-disable-next-line class-methods-use-this
     }, {
       key: "addLookupKeys",
-      value: function addLookupKeys(finalKeys, _key, _code, _ns, _options) {
+      value: function addLookupKeys(finalKeys, key, code, ns, options) {
         // no additional keys needed for select or plural
         // so there is no need to add keys to that finalKeys array
+        if (this.debug && options) this.checkSuffixKeys(key, code, ns, options);
         return finalKeys;
+      }
+
+      // i18next would look up key_one, key_male, ... at this point; MF2 does not, so tell if such keys exist
+    }, {
+      key: "checkSuffixKeys",
+      value: function checkSuffixKeys(key, code, ns, _ref) {
+        var count = _ref.count,
+          context = _ref.context;
+        var _this$i18next$options = this.i18next.options,
+          _this$i18next$options2 = _this$i18next$options.pluralSeparator,
+          pluralSeparator = _this$i18next$options2 === void 0 ? '_' : _this$i18next$options2,
+          _this$i18next$options3 = _this$i18next$options.contextSeparator,
+          contextSeparator = _this$i18next$options3 === void 0 ? '_' : _this$i18next$options3;
+        var store = this.i18next.services.resourceStore;
+        var where = "key \"".concat(key, "\" (").concat(code, "/").concat(ns, ")");
+        if (count !== undefined && this.firstTime("plural ".concat(code, " ").concat(ns, " ").concat(key))) {
+          var found = PLURAL_SUFFIXES.concat(PLURAL_SUFFIXES.map(function (s) {
+            return "ordinal".concat(pluralSeparator).concat(s);
+          })).map(function (s) {
+            return "".concat(key).concat(pluralSeparator).concat(s);
+          }).filter(function (k) {
+            return store.getResource(code, ns, k) !== undefined;
+          });
+          if (found.length) {
+            this.warn("".concat(where, " was called with count, but i18next-mf2 does not look up plural suffix keys (").concat(found.join(', '), "). Put the plural into the message: .input {$count :number} .match $count one {{{$count} item}} * {{{$count} items}}"));
+          }
+        }
+        var contextKey = "".concat(key).concat(contextSeparator).concat(context);
+        if (context !== undefined && context !== '' && this.firstTime("context ".concat(code, " ").concat(ns, " ").concat(contextKey)) && store.getResource(code, ns, contextKey) !== undefined) {
+          this.warn("".concat(where, " was called with context \"").concat(context, "\", but i18next-mf2 does not look up context keys (").concat(contextKey, "). Use a selector in the message: .input {$context :string} .match $context ").concat(context, " {{...}} * {{...}}"));
+        }
+      }
+
+      // true the first time an id is seen, so each warning is logged once
+    }, {
+      key: "firstTime",
+      value: function firstTime(id) {
+        if (this.warned.has(id)) return false;
+        this.warned.add(id);
+        return true;
+      }
+    }, {
+      key: "warn",
+      value: function warn(message) {
+        this.i18next.services.logger.warn("i18next-mf2: ".concat(message, " See ").concat(DOCS_URL));
       }
     }, {
       key: "clearCache",

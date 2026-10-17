@@ -115,6 +115,22 @@ All extra features build around i18next plurals, interpolation, context do not g
 
 react-i18next `<Trans>` placeholders like `<0>text</0>` are plain text in MF2, so they pass through and react-i18next renders them. MF2 markup such as `{#b}text{/b}` is dropped when a message is formatted to a string.
 
+What keeps working and what does not is listed in [Using ICU or MF2](https://www.i18next.com/how-to/using-icu-or-mf2) in the i18next docs.
+
+### debug warnings
+
+With i18next `debug: true`, i18next-mf2 logs a warning through the i18next logger, once per key, when:
+
+- a message can not be parsed or formatted (the default `parseErrorHandler` silently returns the message source), with a hint if it contains i18next interpolation like `{{name}}`
+- a message is only a quoted pattern like `{{name}}`, which MF2 renders as the plain text `name`
+- `t` is called with `count` and plural suffix keys (`key_one`, `key_other`, `key_ordinal_one`, ...) exist for that key
+- `t` is called with `context` and a context key (`key_male`) exists
+- a message contains `$t(` nesting
+- a key resolves to an object or array (`returnObjects`, `joinArrays`)
+- `interpolation.escapeValue` is on, which the plugin does not apply (logged once)
+
+Without `debug` these checks do not run.
+
 ## TypeScript
 
 i18next's type-level interpolation extractor looks for the default `{{variable}}` syntax in your translation strings. MF2 variants like `* {{You have {$numPhotos} photos.}}` use double braces as pattern delimiters, so the extractor reads them as an interpolation and asks for a variable that does not exist.
