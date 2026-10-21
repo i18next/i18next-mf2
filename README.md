@@ -180,6 +180,10 @@ With `i18next` v26.2.0 to v26.4.x, set `parseInterpolation: false` instead. i18n
 
 Both settings are type-only; runtime formatting is handled by messageformat and is not affected.
 
+## Managing the translations
+
+[Locize](https://www.locize.com/docs/integration/i18n-formats?utm_source=i18next_mf2_readme&utm_medium=github&utm_campaign=readme) supports MessageFormat 2 as a project format: the editor highlights the syntax and shows parse errors as `messageformat` reports them, checks variables and the plural forms each language needs, and checks every AI and machine translation for both before it is stored. The details are in the post [AI translations that respect your i18n format](https://www.locize.com/blog/ai-translations-i18n-format?utm_source=i18next_mf2_readme&utm_medium=github&utm_campaign=readme).
+
 ---
 
 <h3 align="center">Gold Sponsors</h3>
